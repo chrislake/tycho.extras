@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!--
-- Copyright (c) 2010, 2015 SAP AG and others.
+- Copyright (c) 2010, 2018 SAP AG and others.
 - All rights reserved. This program and the accompanying materials
 - are made available under the terms of the Eclipse Public License v1.0
 - which accompanies this distribution, and is available at
@@ -16,7 +16,7 @@
 
 	<groupId>org.eclipse.tycho.extras</groupId>
 	<artifactId>tycho-extras</artifactId>
-	<version>0.26.0-SNAPSHOT</version>
+	<version>1.6.0-SNAPSHOT</version>
 	<packaging>pom</packaging>
 
 	<inceptionYear>2010</inceptionYear>
@@ -63,37 +63,40 @@
 		</developer>
 	</developers>
 
-	<name>Tycho Extras (Incubation)</name>
+	<name>Tycho Extras</name>
 	<description>Additional tools for Tycho</description>
 
 	<prerequisites>
-		<maven>3.0</maven>
+		<maven>3.0.5</maven>
 	</prerequisites>
 
 	<properties>
 		<project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
 		<maven-version>3.0</maven-version>
-		<plugin-tools-version>3.3</plugin-tools-version>
-		<jgit-version>4.0.1.201506240215-r</jgit-version>
+		<plugin-tools-version>3.6.0</plugin-tools-version>
+		<jgit-version>5.5.1.201910021850-r</jgit-version>
 		<!-- tycho-extras and tycho are normally developed and released in parallel using the same version -->
 		<tycho-version>${project.version}</tycho-version>
-		<min.jdk.version>1.7</min.jdk.version>
+		<min.jdk.version>1.8</min.jdk.version>
 		<tycho-snapshots-url>https://repo.eclipse.org/content/repositories/tycho-snapshots/</tycho-snapshots-url>
-		<plexusVersion>1.5.5</plexusVersion>
+		<plexusVersion>2.0.0</plexusVersion>
+		<invoker.debug>true</invoker.debug>
 	</properties>
 
 	<modules>
 		<module>tycho-document-bundle-plugin</module>
 		<module>tycho-version-bump-plugin</module>
+		<!-- tycho-source-feature-plugin must run *before* tycho-p2-extras-plguin -->
+		<module>tycho-source-feature-plugin</module>
 		<module>tycho-p2-extras-plugin</module>
 		<module>tycho-custom-bundle-plugin</module>
 		<module>tycho-eclipserun-plugin</module>
-		<module>tycho-source-feature-plugin</module>
 		<module>pack200</module>
 		<module>tycho-buildtimestamp-jgit</module>
 		<module>tycho-sourceref-jgit</module>
 		<module>target-platform-validation-plugin</module>
 		<module>tycho-pomless</module>
+		<module>tycho-dependency-tools-plugin</module>
 	</modules>
 
 	<repositories>
@@ -156,6 +159,25 @@
 				<scope>provided</scope>
 			</dependency>
 			<dependency>
+				<groupId>org.apache.maven</groupId>
+				<artifactId>maven-archiver</artifactId>
+				<version>2.5</version>
+				<exclusions>
+					<exclusion>
+						<groupId>org.apache.maven</groupId>
+						<artifactId>maven-artifact</artifactId>
+					</exclusion>
+					<exclusion>
+						<groupId>org.apache.maven</groupId>
+						<artifactId>maven-model</artifactId>
+					</exclusion>
+					<exclusion>
+						<groupId>org.apache.maven</groupId>
+						<artifactId>maven-project</artifactId>
+					</exclusion>
+				</exclusions>
+			</dependency>
+			<dependency>
 				<groupId>org.eclipse.tycho.extras</groupId>
 				<artifactId>tycho-p2-extras-plugin</artifactId>
 				<version>${project.version}</version>
@@ -216,12 +238,17 @@
 			<dependency>
 				<groupId>org.codehaus.plexus</groupId>
 				<artifactId>plexus-archiver</artifactId>
-				<version>2.9.1</version>
+				<version>3.4</version>
+			</dependency>
+			<dependency>
+				<groupId>org.apache.commons</groupId>
+				<artifactId>commons-compress</artifactId>
+				<version>1.18</version>
 			</dependency>
 			<dependency>
 				<groupId>org.codehaus.plexus</groupId>
 				<artifactId>plexus-utils</artifactId>
-				<version>3.0.7</version>
+				<version>3.0.24</version>
 			</dependency>
 			<dependency>
 				<groupId>org.apache.commons</groupId>
@@ -236,13 +263,13 @@
 			<dependency>
 				<groupId>junit</groupId>
 				<artifactId>junit</artifactId>
-				<version>4.10</version>
+				<version>4.12</version>
 				<scope>test</scope>
 			</dependency>
 			<dependency>
 				<groupId>org.mockito</groupId>
-				<artifactId>mockito-all</artifactId>
-				<version>1.8.4</version>
+				<artifactId>mockito-core</artifactId>
+				<version>3.1.0</version>
 				<scope>test</scope>
 			</dependency>
 		</dependencies>
@@ -282,7 +309,7 @@
 				<plugin>
 					<groupId>org.apache.maven.plugins</groupId>
 					<artifactId>maven-compiler-plugin</artifactId>
-					<version>2.1</version>
+					<version>3.8.1</version>
 					<configuration>
 						<source>${min.jdk.version}</source>
 						<target>${min.jdk.version}</target>
@@ -291,12 +318,32 @@
 				<plugin>
 					<groupId>org.apache.maven.plugins</groupId>
 					<artifactId>maven-clean-plugin</artifactId>
-					<version>2.4.1</version>
+					<version>3.1.0</version>
+				</plugin>
+				<plugin>
+					<groupId>org.apache.maven.plugins</groupId>
+					<artifactId>maven-deploy-plugin</artifactId>
+					<version>2.8.2</version>
+				</plugin>
+				<plugin>
+					<groupId>org.apache.maven.plugins</groupId>
+					<artifactId>maven-jar-plugin</artifactId>
+					<version>3.1.2</version>
+				</plugin>
+				<plugin>
+					<groupId>org.apache.maven.plugins</groupId>
+					<artifactId>maven-install-plugin</artifactId>
+					<version>2.5.2</version>
+				</plugin>
+				<plugin>
+					<groupId>org.apache.maven.plugins</groupId>
+					<artifactId>maven-resources-plugin</artifactId>
+					<version>3.1.0</version>
 				</plugin>
 				<plugin>
 					<groupId>org.apache.maven.plugins</groupId>
 					<artifactId>maven-source-plugin</artifactId>
-					<version>2.1</version>
+					<version>3.1.0</version>
 				</plugin>
 				<!-- workaround for http://jira.codehaus.org/browse/MNG-5346 -->
 				<plugin>
@@ -322,9 +369,9 @@
 				<plugin>
 					<groupId>org.apache.maven.plugins</groupId>
 					<artifactId>maven-invoker-plugin</artifactId>
-					<version>1.6</version>
+					<version>3.2.1</version>
 					<configuration>
-						<debug>true</debug>
+						<debug>${invoker.debug}</debug>
 						<projectsDirectory>src/it</projectsDirectory>
 						<cloneProjectsTo>target/it</cloneProjectsTo>
 						<localRepositoryPath>target/local-repo</localRepositoryPath>
@@ -348,35 +395,15 @@
 				<plugin>
 					<groupId>org.apache.maven.plugins</groupId>
 					<artifactId>maven-site-plugin</artifactId>
-					<version>3.3</version>
+					<version>3.8.2</version>
 					<configuration>
 						<relativizeDecorationLinks>false</relativizeDecorationLinks>
-						<reportPlugins>
-							<plugin>
-								<groupId>org.apache.maven.plugins</groupId>
-								<artifactId>maven-plugin-plugin</artifactId>
-								<version>${plugin-tools-version}</version>
-								<configuration>
-									<requirements>
-										<maven>${maven-version}</maven>
-										<jdk>${min.jdk.version}</jdk>
-									</requirements>
-								</configuration>
-							</plugin>
-							<plugin>
-								<groupId>org.apache.maven.plugins</groupId>
-								<artifactId>maven-project-info-reports-plugin</artifactId>
-								<version>2.4</version>
-								<reportSets>
-									<reportSet>
-										<reports>
-											<report>index</report>
-										</reports>
-									</reportSet>
-								</reportSets>
-							</plugin>
-						</reportPlugins>
 					</configuration>
+				</plugin>
+				<plugin>
+					<groupId>org.apache.maven.plugins</groupId>
+					<artifactId>maven-surefire-plugin</artifactId>
+					<version>2.22.0</version>
 				</plugin>
 				<!-- m2eclipse lifecycle mapping -->
 				<plugin>
@@ -406,6 +433,33 @@
 			</plugins>
 		</pluginManagement>
 	</build>
+	<reporting>
+	<plugins>
+		<plugin>
+			<groupId>org.apache.maven.plugins</groupId>
+			<artifactId>maven-plugin-plugin</artifactId>
+			<version>${plugin-tools-version}</version>
+			<configuration>
+				<requirements>
+					<maven>${maven-version}</maven>
+					<jdk>${min.jdk.version}</jdk>
+				</requirements>
+			</configuration>
+		</plugin>
+		<plugin>
+			<groupId>org.apache.maven.plugins</groupId>
+			<artifactId>maven-project-info-reports-plugin</artifactId>
+			<version>3.0.0</version>
+			<reportSets>
+				<reportSet>
+					<reports>
+						<report>index</report>
+					</reports>
+				</reportSet>
+			</reportSets>
+		</plugin>
+	</plugins>
+	</reporting>
 
 	<profiles>
 		<profile>
@@ -416,7 +470,7 @@
 						<!-- see https://docs.sonatype.org/display/Repository/How+To+Generate+PGP+Signatures+With+Maven -->
 						<groupId>org.apache.maven.plugins</groupId>
 						<artifactId>maven-gpg-plugin</artifactId>
-						<version>1.4</version>
+						<version>1.6</version>
 						<executions>
 							<execution>
 								<id>sign-artifacts</id>
@@ -430,7 +484,7 @@
 					<plugin>
 						<groupId>org.apache.maven.plugins</groupId>
 						<artifactId>maven-javadoc-plugin</artifactId>
-						<version>2.8.1</version>
+						<version>3.1.1</version>
 						<configuration>
 							<failOnError>false</failOnError>
 						</configuration>

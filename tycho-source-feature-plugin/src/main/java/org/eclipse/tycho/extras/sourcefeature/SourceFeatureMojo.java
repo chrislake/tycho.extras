@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2011, 2013 Sonatype Inc. and others.
+ * Copyright (c) 2011, 2018 Sonatype Inc. and others.
  * All rights reserved. This program and the accompanying materials
  * are made available under the terms of the Eclipse Public License v1.0
  * which accompanies this distribution, and is available at
@@ -7,6 +7,7 @@
  *
  * Contributors:
  *    Sonatype Inc. - initial API and implementation
+ *    Bachmann GmbH. - Bug 538395 Generate valid feature xml 
  *******************************************************************************/
 package org.eclipse.tycho.extras.sourcefeature;
 
@@ -15,7 +16,9 @@ import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.HashSet;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Properties;
 import java.util.Set;
@@ -33,15 +36,18 @@ import org.apache.maven.plugins.annotations.Parameter;
 import org.apache.maven.project.MavenProject;
 import org.apache.maven.project.MavenProjectHelper;
 import org.codehaus.plexus.archiver.Archiver;
+import org.codehaus.plexus.archiver.FileSet;
 import org.codehaus.plexus.archiver.jar.JarArchiver;
 import org.codehaus.plexus.archiver.util.DefaultFileSet;
 import org.codehaus.plexus.configuration.PlexusConfiguration;
 import org.codehaus.plexus.logging.Logger;
-import org.codehaus.plexus.util.IOUtil;
+import org.codehaus.plexus.util.AbstractScanner;
 import org.eclipse.sisu.equinox.EquinoxServiceFactory;
 import org.eclipse.tycho.PackagingType;
 import org.eclipse.tycho.artifacts.TargetPlatform;
 import org.eclipse.tycho.core.osgitools.DebugUtils;
+import org.eclipse.tycho.core.shared.BuildProperties;
+import org.eclipse.tycho.core.shared.BuildPropertiesParser;
 import org.eclipse.tycho.core.utils.TychoProjectUtils;
 import org.eclipse.tycho.model.Feature;
 import org.eclipse.tycho.model.FeatureRef;
@@ -68,7 +74,8 @@ import de.pdark.decentxml.Element;
  * appended to each plugin id</li>
  * <li>Includes all features included by &lt;originalFeature&gt;, but each with <code>.source</code>
  * appended to each feature id</li>
- * <li>Includes the original feature. This ensures that binaries and corresponding sources match.</li>
+ * <li>Includes the original feature. This ensures that binaries and corresponding sources
+ * match.</li>
  * </ul>
  * 
  * Source feature generation can be customized by adding files under path
@@ -157,6 +164,9 @@ public class SourceFeatureMojo extends AbstractMojo {
     @Parameter
     private PlexusConfiguration plugins;
 
+    @Parameter(defaultValue = "true")
+    protected boolean useDefaultExcludes;
+
     @Parameter(property = "session", readonly = true)
     private MavenSession session;
 
@@ -186,6 +196,9 @@ public class SourceFeatureMojo extends AbstractMojo {
     private LicenseFeatureHelper licenseFeatureHelper;
 
     @Component
+    private BuildPropertiesParser buildPropertiesParser;
+
+    @Component
     private EquinoxServiceFactory equinox;
 
     @Component
@@ -213,15 +226,19 @@ public class SourceFeatureMojo extends AbstractMojo {
                 templateFileSet.setExcludes(new String[] { Feature.FEATURE_XML, FEATURE_PROPERTIES });
                 archiver.getArchiver().addFileSet(templateFileSet);
             }
+
+            BuildProperties buildProperties = buildPropertiesParser.parse(project.getBasedir());
+            archiver.getArchiver().addFileSet(getManuallyIncludedFiles(project.getBasedir(), buildProperties));
+
             archiver.getArchiver().addFile(sourceFeatureXml, Feature.FEATURE_XML);
             archiver.getArchiver().addFile(getMergedSourceFeaturePropertiesFile(), FEATURE_PROPERTIES);
-            File licenseFeature = licenseFeatureHelper.getLicenseFeature(
-                    Feature.read(new File(project.getBasedir(), "feature.xml")), project);
+            File licenseFeature = licenseFeatureHelper
+                    .getLicenseFeature(Feature.read(new File(project.getBasedir(), "feature.xml")), project);
             if (licenseFeature != null) {
                 archiver.getArchiver()
                         .addArchivedFileSet(licenseFeatureHelper.getLicenseFeatureFileSet(licenseFeature));
             }
-            archiver.createArchive(project, archive);
+            archiver.createArchive(session, project, archive);
 
             projectHelper.attachArtifact(project, outputJarFile, SOURCES_FEATURE_CLASSIFIER);
         } catch (MojoExecutionException e) {
@@ -240,8 +257,8 @@ public class SourceFeatureMojo extends AbstractMojo {
     }
 
     private Properties mergeFeatureProperties(Properties sourceFeatureTemplateProps) throws IOException {
-        Properties generatedOriginalFeatureProps = readPropertiesIfExists(new File(project.getBuild().getDirectory(),
-                FEATURE_PROPERTIES));
+        Properties generatedOriginalFeatureProps = readPropertiesIfExists(
+                new File(project.getBuild().getDirectory(), FEATURE_PROPERTIES));
         Properties mergedProperties = new Properties();
         mergedProperties.putAll(generatedOriginalFeatureProps);
         mergedProperties.putAll(sourceFeatureTemplateProps);
@@ -272,12 +289,8 @@ public class SourceFeatureMojo extends AbstractMojo {
     private static Properties readPropertiesIfExists(File propertiesFile) throws IOException {
         Properties properties = new Properties();
         if (propertiesFile.isFile()) {
-            FileInputStream propertiesStream = null;
-            try {
-                propertiesStream = new FileInputStream(propertiesFile);
+            try (FileInputStream propertiesStream = new FileInputStream(propertiesFile)) {
                 properties.load(propertiesStream);
-            } finally {
-                IOUtil.close(propertiesStream);
             }
         }
         return properties;
@@ -285,11 +298,8 @@ public class SourceFeatureMojo extends AbstractMojo {
 
     private static void writeProperties(Properties props, File propertiesFile) throws IOException {
         propertiesFile.getParentFile().mkdirs();
-        FileOutputStream out = new FileOutputStream(propertiesFile);
-        try {
-            props.save(out, "");
-        } finally {
-            IOUtil.close(out);
+        try (FileOutputStream out = new FileOutputStream(propertiesFile)) {
+            props.store(out, "");
         }
     }
 
@@ -313,30 +323,14 @@ public class SourceFeatureMojo extends AbstractMojo {
             sourceFeature.setBrandingPluginId(brandingPlugin);
         }
 
-        if (includeBinaryFeature) {
-            FeatureRef binaryRef = new FeatureRef(new Element("includes"));
-            binaryRef.setId(feature.getId());
-            binaryRef.setVersion(feature.getVersion());
-            if (feature.getOS() != null) {
-                binaryRef.setOS(feature.getOS());
-            }
-            if (feature.getWS() != null) {
-                binaryRef.setWS(feature.getWS());
-            }
-            if (feature.getArch() != null) {
-                binaryRef.setArch(feature.getArch());
-            }
-            sourceFeature.addFeatureRef(binaryRef);
-        }
-
         if (feature.getLabel() != null) {
             String originalLabel = feature.getLabel();
             if (originalLabel.startsWith("%")) {
                 sourceFeature.setLabel(validateValue(originalLabel, mergedFeatureProperties));
                 String labelKey = originalLabel.substring(1);
                 if (sourceTemplateProperties.getProperty(labelKey) == null) {
-                    mergedFeatureProperties.setProperty(labelKey, mergedFeatureProperties.getProperty(labelKey)
-                            + labelSuffix);
+                    mergedFeatureProperties.setProperty(labelKey,
+                            mergedFeatureProperties.getProperty(labelKey) + labelSuffix);
                 } else {
                     // keep source template value 
                 }
@@ -365,6 +359,23 @@ public class SourceFeatureMojo extends AbstractMojo {
         if (feature.getLicenseURL() != null) {
             sourceFeature.setLicenseURL(validateValue(feature.getLicenseURL(), mergedFeatureProperties));
         }
+
+        if (includeBinaryFeature) {
+            FeatureRef binaryRef = new FeatureRef(new Element("includes"));
+            binaryRef.setId(feature.getId());
+            binaryRef.setVersion(feature.getVersion());
+            if (feature.getOS() != null) {
+                binaryRef.setOS(feature.getOS());
+            }
+            if (feature.getWS() != null) {
+                binaryRef.setWS(feature.getWS());
+            }
+            if (feature.getArch() != null) {
+                binaryRef.setArch(feature.getArch());
+            }
+            sourceFeature.addFeatureRef(binaryRef);
+        }
+
         return sourceFeature;
     }
 
@@ -399,29 +410,12 @@ public class SourceFeatureMojo extends AbstractMojo {
     private void fillReferences(Feature sourceFeature, Feature feature, TargetPlatform targetPlatform)
             throws MojoExecutionException {
         P2ResolverFactory factory = this.equinox.getService(P2ResolverFactory.class);
-        P2Resolver p2 = factory.createResolver(new MavenLoggerAdapter(this.logger, DebugUtils.isDebugEnabled(
-                this.session, this.project)));
+        P2Resolver p2 = factory.createResolver(
+                new MavenLoggerAdapter(this.logger, DebugUtils.isDebugEnabled(this.session, this.project)));
 
         List<PluginRef> missingSourcePlugins = new ArrayList<>();
         List<FeatureRef> missingSourceFeatures = new ArrayList<>();
         List<PluginRef> missingExtraPlugins = new ArrayList<>();
-
-        // include available source bundles
-        for (PluginRef pluginRef : feature.getPlugins()) {
-
-            if (excludedPlugins.contains(pluginRef.getId())) {
-                continue;
-            }
-
-            // version is expected to be fully expanded at this point
-            P2ResolutionResult result = p2.resolveInstallableUnit(targetPlatform, pluginRef.getId() + ".source",
-                    toStrictVersionRange(pluginRef.getVersion()));
-            if (result.getArtifacts().size() == 1) {
-                addPlugin(sourceFeature, result, pluginRef);
-            } else {
-                missingSourcePlugins.add(pluginRef);
-            }
-        }
 
         // include available source features
         for (FeatureRef featureRef : feature.getIncludedFeatures()) {
@@ -444,6 +438,23 @@ public class SourceFeatureMojo extends AbstractMojo {
                 sourceFeature.addFeatureRef(sourceRef);
             } else {
                 missingSourceFeatures.add(featureRef);
+            }
+        }
+
+        // include available source bundles
+        for (PluginRef pluginRef : feature.getPlugins()) {
+
+            if (excludedPlugins.contains(pluginRef.getId())) {
+                continue;
+            }
+
+            // version is expected to be fully expanded at this point
+            P2ResolutionResult result = p2.resolveInstallableUnit(targetPlatform, pluginRef.getId() + ".source",
+                    toStrictVersionRange(pluginRef.getVersion()));
+            if (result.getArtifacts().size() == 1) {
+                addPlugin(sourceFeature, result, pluginRef);
+            } else {
+                missingSourcePlugins.add(pluginRef);
             }
         }
 
@@ -554,10 +565,49 @@ public class SourceFeatureMojo extends AbstractMojo {
             return null;
         }
         attr = attr.trim();
-        if (attr.length() == 0) {
+        if (attr.isEmpty()) {
             return null;
         }
         return attr;
     }
 
+    /**
+     * @return A {@link FileSet} including files as configured by the <tt>src.includes</tt> and
+     *         <tt>src.excludes</tt> properties without the files that are always included
+     *         automatically.
+     */
+    private FileSet getManuallyIncludedFiles(File basedir, BuildProperties buildProperties) {
+        List<String> srcExcludes = new ArrayList<>(buildProperties.getSourceExcludes());
+        srcExcludes.add(Feature.FEATURE_XML); // we'll include updated feature.xml
+        srcExcludes.add(FEATURE_PROPERTIES); // we'll include updated feature.properties
+        return getFileSet(basedir, buildProperties.getSourceIncludes(), srcExcludes);
+    }
+
+    /**
+     * @return a {@link FileSet} with the given includes and excludes and the configured default
+     *         excludes. An empty list of includes leads to an empty file set.
+     */
+    protected FileSet getFileSet(File basedir, List<String> includes, List<String> excludes) {
+        DefaultFileSet fileSet = new DefaultFileSet();
+        fileSet.setDirectory(basedir);
+
+        if (includes.isEmpty()) {
+            // FileSet interprets empty list as "everything", so we need to express "nothing" in a different way
+            fileSet.setIncludes(new String[] { "" });
+        } else {
+            fileSet.setIncludes(includes.toArray(new String[includes.size()]));
+        }
+
+        Set<String> allExcludes = new LinkedHashSet<>();
+        if (excludes != null) {
+            allExcludes.addAll(excludes);
+        }
+        if (useDefaultExcludes) {
+            allExcludes.addAll(Arrays.asList(AbstractScanner.DEFAULTEXCLUDES));
+        }
+
+        fileSet.setExcludes(allExcludes.toArray(new String[allExcludes.size()]));
+
+        return fileSet;
+    }
 }

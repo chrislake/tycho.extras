@@ -105,15 +105,16 @@ public class TocWriter {
         createTopic(doc, main, "Constant Values", "constant-values.html");
         createTopic(doc, main, "Deprecated List", "deprecated-list.html");
 
-        final LineNumberReader reader = new LineNumberReader(new FileReader(new File(this.javadocDir, "package-list")));
-        try {
+        File packageList = new File(this.javadocDir, "package-list");
+        if (!packageList.exists()) {
+            packageList = new File(this.javadocDir, "element-list");
+        }
+        try (LineNumberReader reader = new LineNumberReader(new FileReader(packageList))) {
             String line;
 
             while ((line = reader.readLine()) != null) {
                 createTopic(doc, packages, line, line.replace('.', '/') + "/package-summary.html");
             }
-        } finally {
-            reader.close();
         }
     }
 

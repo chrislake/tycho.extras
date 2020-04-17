@@ -33,6 +33,7 @@ import org.eclipse.tycho.p2.facade.internal.AttachedArtifact;
 import org.eclipse.tycho.p2.metadata.DependencyMetadataGenerator;
 import org.eclipse.tycho.p2.metadata.IArtifactFacade;
 import org.eclipse.tycho.p2.metadata.IDependencyMetadata;
+import org.eclipse.tycho.p2.metadata.PublisherOptions;
 import org.eclipse.tycho.p2.resolver.P2MetadataProvider;
 
 /**
@@ -46,6 +47,7 @@ public class CustomBundleP2MetadataProvider implements P2MetadataProvider, Initi
 
     private DependencyMetadataGenerator generator;
 
+    @Override
     public Map<String, IDependencyMetadata> getDependencyMetadata(MavenSession session, MavenProject project,
             List<TargetEnvironment> environments, OptionalResolutionAction optionalAction) {
         Map<String, IDependencyMetadata> metadata = new LinkedHashMap<>();
@@ -57,10 +59,8 @@ public class CustomBundleP2MetadataProvider implements P2MetadataProvider, Initi
                 String classifier = getClassifier(execution);
                 if (location != null && classifier != null) {
                     IArtifactFacade artifact = new AttachedArtifact(project, location, classifier);
-                    metadata.put(
-                            classifier,
-                            new SecondaryDependencyMetadata(generator.generateMetadata(artifact, environments,
-                                    optionalAction)));
+                    metadata.put(classifier, new SecondaryDependencyMetadata(generator.generateMetadata(artifact,
+                            environments, optionalAction, new PublisherOptions())));
                 }
             }
         }
@@ -91,6 +91,7 @@ public class CustomBundleP2MetadataProvider implements P2MetadataProvider, Initi
         return new File(locationDom.getValue());
     }
 
+    @Override
     public void initialize() throws InitializationException {
         this.generator = equinox.getService(DependencyMetadataGenerator.class, "(role-hint=dependency-only)");
     }

@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2011 SAP AG and others.
+ * Copyright (c) 2011, 2019 SAP AG and others.
  * All rights reserved. This program and the accompanying materials
  * are made available under the terms of the Eclipse Public License v1.0
  * which accompanies this distribution, and is available at
@@ -7,6 +7,7 @@
  *
  * Contributors:
  *    Jan Sievers - initial API and implementation
+ *    Mickael Istria (Red Hat Inc.) - 518813 Use target-platform repository
  *******************************************************************************/
 package org.eclipse.tycho.plugins.p2.extras;
 
@@ -18,6 +19,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
+import org.apache.maven.execution.MavenSession;
 import org.apache.maven.plugin.AbstractMojo;
 import org.apache.maven.plugin.MojoExecutionException;
 import org.apache.maven.plugin.MojoFailureException;
@@ -27,6 +29,8 @@ import org.apache.maven.plugins.annotations.Parameter;
 import org.apache.maven.project.MavenProject;
 import org.eclipse.sisu.equinox.EquinoxServiceFactory;
 import org.eclipse.tycho.BuildOutputDirectory;
+import org.eclipse.tycho.core.TychoProject;
+import org.eclipse.tycho.p2.facade.RepositoryReferenceTool;
 import org.eclipse.tycho.p2.tools.DestinationRepositoryDescriptor;
 import org.eclipse.tycho.p2.tools.FacadeException;
 import org.eclipse.tycho.p2.tools.RepositoryReferences;
@@ -43,16 +47,27 @@ import org.eclipse.tycho.p2.tools.mirroring.facade.MirrorOptions;
 @Mojo(name = "mirror")
 public class MirrorMojo extends AbstractMojo {
 
-    @Parameter(property = "project")
+    @Parameter(property = "project", readonly = true)
     private MavenProject project;
+
+    @Parameter(property = "session", readonly = true)
+    private MavenSession session;
 
     @Component
     private EquinoxServiceFactory p2;
 
+    @Component
+    private RepositoryReferenceTool repositoryReferenceTool;
+
+    @Component(role = TychoProject.class)
+    private Map<String, TychoProject> projectTypes;
+
     /**
      * Source repositori(es) to mirror from.
+     * 
+     * @see also {@link #targetPlatformAsSource} and {@link #currentModuleAsSource}
      */
-    @Parameter(required = true)
+    @Parameter(required = false)
     private List<Repository> source;
 
     /**
@@ -173,10 +188,51 @@ public class MirrorMojo extends AbstractMojo {
     @Parameter(defaultValue = "true")
     private boolean keepNonXzIndexFiles;
 
+    /**
+     * <p>
+     * Whether to add the target-platform content as a source. Ignored for non-Tycho packaging
+     * types.
+     * </p>
+     * 
+     * @since 1.1.0
+     */
+    @Parameter(defaultValue = "false")
+    private boolean targetPlatformAsSource;
+
+    /**
+     * <p>
+     * Whether the current build p2 output should be added as source. Ignored for non-Tycho
+     * packaging types. Ignored if {@link #targetPlatformAsSource} == false;
+     * </p>
+     * 
+     * @since 1.1.0
+     */
+    @Parameter(defaultValue = "true")
+    private boolean currentModuleAsSource;
+
+    /**
+     * <p>
+     * If set to true, mirroring continues to run in the event of an error during the mirroring
+     * process and will just log an info message.
+     * </p>
+     * 
+     * @since 1.1.0
+     */
+    @Parameter(defaultValue = "false")
+    private boolean ignoreErrors;
+
+    @Override
     public void execute() throws MojoExecutionException, MojoFailureException {
         final MirrorApplicationService mirrorService = p2.getService(MirrorApplicationService.class);
 
-        final RepositoryReferences sourceDescriptor = new RepositoryReferences();
+        RepositoryReferences sourceDescriptor = null;
+        if (this.projectTypes.containsKey(project.getPackaging()) && this.repositoryReferenceTool != null
+                && this.targetPlatformAsSource) {
+            sourceDescriptor = repositoryReferenceTool.getVisibleRepositories(this.project, this.session,
+                    this.currentModuleAsSource ? RepositoryReferenceTool.REPOSITORIES_INCLUDE_CURRENT_MODULE : 0);
+        } else {
+            sourceDescriptor = new RepositoryReferences();
+        }
         for (final Repository sourceRepository : source) {
             if (sourceRepository.getLayout().hasMetadata()) {
                 sourceDescriptor.addMetadataRepository(sourceRepository.getLocation());
@@ -185,12 +241,17 @@ public class MirrorMojo extends AbstractMojo {
                 sourceDescriptor.addArtifactRepository(sourceRepository.getLocation());
             }
         }
+        if (sourceDescriptor.getArtifactRepositories().isEmpty()
+                && sourceDescriptor.getMetadataRepositories().isEmpty()) {
+            throw new MojoExecutionException("No repository provided as 'source'");
+        }
 
         if (name == null) {
             name = "";
         }
         final DestinationRepositoryDescriptor destinationDescriptor = new DestinationRepositoryDescriptor(destination,
-                name, compress, xzCompress, keepNonXzIndexFiles, mirrorMetadataOnly, append);
+                name, compress, xzCompress, keepNonXzIndexFiles, mirrorMetadataOnly, append, Collections.emptyMap(),
+                Collections.emptyList());
         getLog().info("Mirroring to " + destination + "...");
         try {
             mirrorService.mirrorStandalone(sourceDescriptor, destinationDescriptor, createIUDescriptions(),
@@ -210,6 +271,7 @@ public class MirrorMojo extends AbstractMojo {
         options.setLatestVersionOnly(latestVersionOnly);
         options.getFilter().putAll(filter);
         options.setIncludePacked(includePacked);
+        options.setIgnoreErrors(ignoreErrors);
         return options;
     }
 

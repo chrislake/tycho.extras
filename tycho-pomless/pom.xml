@@ -17,12 +17,12 @@
 	<parent>
 		<groupId>org.eclipse.tycho.extras</groupId>
 		<artifactId>tycho-extras</artifactId>
-		<version>0.26.0-SNAPSHOT</version>
+		<version>1.6.0-SNAPSHOT</version>
 	</parent>
 	
   <artifactId>tycho-pomless</artifactId>
 
-  <name>Tycho POM-less build extension (Incubation)</name>
+  <name>Tycho POM-less build extension</name>
   <description>A build extension which allows to omit pom.xml files for bundles and features. 
   Maven groupId is inherited from the mandatory parent pom in the parent directory, artifactId and version are derived from MANIFEST.MF and feature.xml
   </description>
@@ -42,7 +42,7 @@
     <dependency>
       <groupId>io.takari.polyglot</groupId>
       <artifactId>polyglot-common</artifactId>
-      <version>0.1.5</version>
+      <version>0.4.3</version>
     </dependency>
     <dependency>
       <groupId>org.eclipse.sisu</groupId>

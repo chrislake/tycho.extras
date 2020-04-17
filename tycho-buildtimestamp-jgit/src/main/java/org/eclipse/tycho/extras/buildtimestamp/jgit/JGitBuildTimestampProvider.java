@@ -57,7 +57,7 @@ import org.eclipse.tycho.buildversion.BuildTimestampProvider;
  * the current build timestamp.
  * <p/>
  * 
- * For additional flexibility, some files can be ignored using gitignore patters specified in
+ * For additional flexibility, some files can be ignored using gitignore patterns specified in
  * &ltjgit.ignore> element of tycho-packaging-plugin configuration block.
  * 
  * <p>
@@ -65,22 +65,22 @@ import org.eclipse.tycho.buildversion.BuildTimestampProvider;
  * 
  * <pre>
  * ...
- *       &lt;plugin>
- *         &lt;groupId>org.eclipse.tycho&lt;/groupId>
- *         &lt;artifactId>tycho-packaging-plugin&lt;/artifactId>
- *         &lt;version>${tycho-version}&lt;/version>
- *         &lt;dependencies>
- *           &lt;dependency>
- *             &lt;groupId>org.eclipse.tycho.extras&lt;/groupId>
- *             &lt;artifactId>tycho-buildtimestamp-jgit&lt;/artifactId>
- *             &lt;version>${tycho-version}&lt;/version>
- *           &lt;/dependency>
- *         &lt;/dependencies>
- *         &lt;configuration>
- *           &lt;timestampProvider>jgit&lt;/timestampProvider>
+ *       &lt;plugin&gt;
+ *         &lt;groupId&gt;org.eclipse.tycho&lt;/groupId&gt;
+ *         &lt;artifactId&gt;tycho-packaging-plugin&lt;/artifactId&gt;
+ *         &lt;version&gt;${tycho-version}&lt;/version&gt;
+ *         &lt;dependencies&gt;
+ *           &lt;dependency&gt;
+ *             &lt;groupId&gt;org.eclipse.tycho.extras&lt;/groupId&gt;
+ *             &lt;artifactId&gt;tycho-buildtimestamp-jgit&lt;/artifactId&gt;
+ *             &lt;version&gt;${tycho-version}&lt;/version&gt;
+ *           &lt;/dependency&gt;
+ *         &lt;/dependencies&gt;
+ *         &lt;configuration&gt;
+ *           &lt;timestampProvider&gt;jgit&lt;/timestampProvider&gt;
  *           &lt;jgit.ignore>pom.xml&lt;/jgit.ignore>
- *         &lt;/configuration>
- *       &lt;/plugin>
+ *         &lt;/configuration&gt;
+ *       &lt;/plugin&gt;
  * ...
  * </pre>
  */
@@ -121,6 +121,7 @@ public class JGitBuildTimestampProvider implements BuildTimestampProvider {
         }
     }
 
+    @Override
     public Date getTimestamp(MavenSession session, MavenProject project, MojoExecution execution)
             throws MojoExecutionException {
         FileRepositoryBuilder builder = new FileRepositoryBuilder() //
@@ -131,11 +132,17 @@ public class JGitBuildTimestampProvider implements BuildTimestampProvider {
             throw new MojoExecutionException("No git repository found searching upwards from " + project.getBasedir());
         }
         try {
-            Repository repository = builder.build();
-            try {
+            try (Repository repository = builder.build()) {
                 String relPath = getRelPath(repository, project);
                 TreeFilter pathFilter = createPathFilter(relPath, execution);
                 ObjectId headId = repository.resolve(Constants.HEAD);
+                if (headId == null) {
+                    String message = "Git repository without HEAD on " + project.getBasedir()
+                            + ". You can make a first commit to solve that.";
+                    logger.warn(message);
+                    logger.warn("Fallback to default timestamp provider");
+                    return defaultTimestampProvider.getTimestamp(session, project, execution);
+                }
                 DirtyBehavior dirtyBehaviour = DirtyBehavior.getDirtyWorkingTreeBehaviour(execution);
                 if (dirtyBehaviour != DirtyBehavior.IGNORE) {
                     // 1. check if 'git status' is clean for relPath
@@ -163,26 +170,85 @@ public class JGitBuildTimestampProvider implements BuildTimestampProvider {
                     }
                 }
                 // 2. get latest commit for relPath
-                RevWalk walk = new RevWalk(repository);
-                try {
+                try (RevWalk walk = new RevWalk(repository)) {
                     if (pathFilter != null) {
                         walk.setTreeFilter(AndTreeFilter.create(pathFilter, TreeFilter.ANY_DIFF));
                     }
                     walk.markStart(walk.parseCommit(headId));
+                    walk.setRewriteParents(false);
                     RevCommit commit = walk.next();
                     // When dirtyBehaviour==ignore and no commit was ever done, 
                     // the commit is null, so we fallback to the defaultTimestampProvider
                     if (commit == null) {
                         logger.info(
-                                "Fallback to default timestamp provider, because no commit could be found for that project (Shared but not commited yet).");
+                                "Fallback to default timestamp provider, because no commit could be found for that project (Shared but not committed yet).");
                         return defaultTimestampProvider.getTimestamp(session, project, execution);
                     }
                     return new Date(commit.getCommitTime() * 1000L);
-                } finally {
-                    walk.close();
                 }
-            } finally {
-                repository.close();
+            }
+        } catch (IOException e) {
+            throw new MojoExecutionException("Could not determine git commit timestamp", e);
+        }
+    }
+
+    public String getTimestampString(MavenSession session, MavenProject project, MojoExecution execution)
+            throws MojoExecutionException {
+        FileRepositoryBuilder builder = new FileRepositoryBuilder() //
+                .readEnvironment() //
+                .findGitDir(project.getBasedir()) //
+                .setMustExist(true);
+        if (builder.getGitDir() == null) {
+            throw new MojoExecutionException("No git repository found searching upwards from " + project.getBasedir());
+        }
+        try {
+            try (Repository repository = builder.build()) {
+                String relPath = getRelPath(repository, project);
+                TreeFilter pathFilter = createPathFilter(relPath, execution);
+                ObjectId headId = repository.resolve(Constants.HEAD);
+                DirtyBehavior dirtyBehaviour = DirtyBehavior.getDirtyWorkingTreeBehaviour(execution);
+                if (dirtyBehaviour != DirtyBehavior.IGNORE) {
+                    // 1. check if 'git status' is clean for relPath
+                    IndexDiff diff = new IndexDiff(repository, headId, new FileTreeIterator(repository));
+                    // Ignore all the submodules (together with the pathFilter this will ignore changes done in not related submodules #480951)
+                    diff.setIgnoreSubmoduleMode(IgnoreSubmoduleMode.ALL);
+                    if (pathFilter != null) {
+                        diff.setFilter(pathFilter);
+                    }
+                    diff.diff();
+                    Status status = new Status(diff);
+                    if (!status.isClean()) {
+                        String message = "Working tree is dirty.\ngit status " + (relPath != null ? relPath : "")
+                                + ":\n" + toGitStatusStyleOutput(diff);
+                        if (dirtyBehaviour == DirtyBehavior.WARNING) {
+                            logger.warn(message);
+                            logger.warn("Fallback to default timestamp provider");
+                            return defaultTimestampProvider.getTimestampString(session, project, execution);
+                        } else {
+                            throw new MojoExecutionException(message + "\n"
+                                    + "You are trying to use tycho-buildtimestamp-jgit on a directory that has uncommitted changes (see details above)."
+                                    + "\nEither commit all changes/add files to .gitignore, or enable fallback to default timestamp provider by configuring "
+                                    + "\njgit.dirtyWorkingTree=warning for tycho-packaging-plugin");
+                        }
+                    }
+                }
+                // 2. get latest commit for relPath
+                try (RevWalk walk = new RevWalk(repository)) {
+                    if (pathFilter != null) {
+                        walk.setTreeFilter(AndTreeFilter.create(pathFilter, TreeFilter.ANY_DIFF));
+                    }
+                    walk.markStart(walk.parseCommit(headId));
+                    walk.setRewriteParents(false);
+                    RevCommit commit = walk.next();
+                    // When dirtyBehaviour==ignore and no commit was ever done, 
+                    // the commit is null, so we fallback to the defaultTimestampProvider
+                    if (commit == null) {
+                        logger.info(
+                                "Fallback to default timestamp provider, because no commit could be found for that project (Shared but not committed yet).");
+                        return defaultTimestampProvider.getTimestampString(session, project, execution);
+                    }
+                    return commit.abbreviate(7).name();
+                }
             }
         } catch (IOException e) {
             throw new MojoExecutionException("Could not determine git commit timestamp", e);
@@ -205,7 +271,7 @@ public class JGitBuildTimestampProvider implements BuildTimestampProvider {
         if (ignoreDom == null) {
             return null;
         }
-        return ignoreDom.getValue();
+        return ignoreDom.getValue().trim();
     }
 
     private String getRelPath(Repository repository, MavenProject project) throws IOException {

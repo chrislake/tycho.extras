@@ -15,12 +15,12 @@
   <parent>
     <artifactId>tycho-extras</artifactId>
     <groupId>org.eclipse.tycho.extras</groupId>
-    <version>0.26.0-SNAPSHOT</version>
+    <version>1.6.0-SNAPSHOT</version>
   </parent>
 
   <artifactId>tycho-eclipserun-plugin</artifactId>
   <packaging>maven-plugin</packaging>
-  <name>Eclipserun Plugin (Incubation)</name>
+  <name>Eclipserun Plugin</name>
       <dependencies>
 		<dependency>
 			<groupId>org.apache.maven.plugin-tools</groupId>
@@ -49,7 +49,7 @@
 		</dependency>
 		<dependency>
 			<groupId>org.mockito</groupId>
-			<artifactId>mockito-all</artifactId>
+			<artifactId>mockito-core</artifactId>
 		</dependency>
 	</dependencies>
 	<profiles>
