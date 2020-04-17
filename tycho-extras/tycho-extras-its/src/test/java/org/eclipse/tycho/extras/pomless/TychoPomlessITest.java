@@ -7,7 +7,7 @@
  *
  * Contributors:
  *     SAP SE - initial API and implementation
- *     Christoph Läubrich - add testPomlessFlatBuildExtension
+ *     Christoph LÃ¤ubrich - add testPomlessFlatBuildExtension
  *******************************************************************************/
 package org.eclipse.tycho.extras.pomless;
 
